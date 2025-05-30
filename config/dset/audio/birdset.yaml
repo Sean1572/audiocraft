@@ -1,0 +1,11 @@
+# @package __global__
+
+# AudioCaps dataset
+datasource:
+  max_sample_rate: 32000
+  max_channels: 1
+
+  train: egs/birdset  # only evaluation set
+  valid: egs/birdset  # only evaluation set
+  evaluate: egs/birdset
+  generate: egs/birdset # identical to evaluate
