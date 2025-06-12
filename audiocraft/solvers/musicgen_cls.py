@@ -94,7 +94,7 @@ class MusicGenSolverCLS(MusicGenSolver):
             labels.append(label)
 
         # print(torch.vstack(audios).shape,  torch.vstack(labels).shape, flush=True)
-        return torch.vstack(audios).unsqueeze(1), torch.vstack(labels)
+        return torch.vstack(audios).unsqueeze(1).cuda(), torch.vstack(labels).cuda()
 
     def build_cls_dataset(self):
         self.ds = load_dataset("DBD-research-group/BirdSet", "HSN", trust_remote_code=True)
@@ -133,23 +133,24 @@ class MusicGenSolverCLS(MusicGenSolver):
         self.build_temp_model()
         self.cls_model = self.cls_model.cuda()
 
-        # Short training loop, should only do an epoch as a quick test
-        # TODO
-
         # Train Loop
         criterion = nn.BCEWithLogitsLoss()
         optimizer = optim.Adam(self.cls_model.parameters(), lr=0.001)
-        self.cls_model.train()
+        # self.cls_model.train() # THERE IS A BUG HERE
+        # I think during training requires audio conditioning
+        # And we aren't doing audio conditioning... currently
         for i, batch in enumerate(self.cls_dataloaders["train"]):
             # Step 3: Data preprocessing to fake a dataset, because I am lazy
             # TODO: turn this into a function call, need for training too
             audio_data, labels = self.transform_hugging_face_ds(batch)
-            print([self.get_metadata(item["filepath"]) for item in batch])
             condition_tensors, audio_tokens, padding_mask = self._prepare_tokens_and_attributes(
                 (audio_data, [self.get_metadata(item["filepath"]) for item in batch]))
-            print(condition_tensors)
+            description_tesnor = condition_tensors["description"][0].to(torch.float32)
+            condition_tensors["description"] = (description_tesnor, condition_tensors["description"][1])
+
             optimizer.zero_grad()
             output = self.cls_model(audio_tokens, condition_tensors)
+            print(output)
             loss = criterion(output, labels)
             loss.backward()
             optimizer.step()
@@ -162,15 +163,13 @@ class MusicGenSolverCLS(MusicGenSolver):
             # Step 3: Data preprocessing to fake a dataset, because I am lazy
             # TODO: turn this into a function call, need for training too
             audio_data, labels = self.transform_hugging_face_ds(batch)
-            print(batch)
-            print(audio_data)
             condition_tensors, audio_tokens, padding_mask = self._prepare_tokens_and_attributes(
                 (audio_data, [self.get_metadata(item["filepath"]) for item in batch]))
+            description_tesnor = condition_tensors["description"][0].to(torch.float32)
+            condition_tensors["description"] = (description_tesnor, condition_tensors["description"][1])
 
             # TODO Get metrics from model performance on soundscapes / xc validation split?
             
-            description_tesnor = condition_tensors["description"][0].to(torch.float32)
-            condition_tensors["description"] = (description_tesnor, condition_tensors["description"][1])
             print(audio_tokens.shape, condition_tensors["description"][0].shape)
             print(self.cls_model(audio_tokens, condition_tensors).shape, labels.shape)
 
