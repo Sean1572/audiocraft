@@ -10,7 +10,7 @@ defaults:
 autocast: true
 autocast_dtype: float16
 
-solver: musicgen
+solver: musicgen_cls
 sample_rate: ???
 channels: ???
 compression_model_checkpoint: ???
