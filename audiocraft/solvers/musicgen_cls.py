@@ -22,34 +22,33 @@ from torch.utils.data import DataLoader
 
 
 from datasets import load_dataset
-from ..data.info_audio_dataset import AudioMeta 
-from ..data.music_dataset import MusicInfo 
+from ..data.info_audio_dataset import AudioMeta
+from ..data.music_dataset import MusicInfo, WavCondition  
 
 from . import MusicGenSolver
 
-class CLSModel(torch.nn.Module):
+class CLSModel(nn.Module):
     def __init__(self, model, num_species):
         super().__init__()
+        
         self.model = model
-        for param in self.model.parameters():
-            param.requires_grad = False
+        # for param in self.model.parameters():
+        #     param.requires_grad = False
 
         # All dimensions that aren't batch for final classification
-        # Does this make sense? Probably not. 
+        # Does this make sense? Probably not. Who is to say the last layer of music gen is useful at all!
         # Will need to dig deeper into musicgen to figure out most useful layer
-        TODO_FIND_LAYER_SIZE = 2048 * 250 * 4 
-        self.linear = torch.nn.Linear(TODO_FIND_LAYER_SIZE, num_species)
-
-    def __del__(self):
-        for param in self.model.parameters():
-            param.requires_grad = True
+        self.FINAL_LAYER_SIZE = 2048 * 250 * 4 
+        self.linear = nn.Linear(self.FINAL_LAYER_SIZE, num_species, dtype=torch.float32)
     
     def forward(self, audio_tokens, condition_tensors):
-        print(audio_tokens.shape)
-        model_output = self.model.compute_predictions(audio_tokens, [], condition_tensors)
-        logits = model_output.logits.reshape(-1, 2048 * 250 * 4) #TODO WHAT TO DO HERE...
-        print(logits.shape)
+        with torch.no_grad():
+            model_output = self.model(audio_tokens, [], condition_tensors) #.compute_predictions
+            logits = model_output.reshape(-1, self.FINAL_LAYER_SIZE)
+
+        logits = torch.Tensor(logits.cpu().detach().cuda()).requires_grad_()
         out = self.linear(logits)
+
         return out
 
 def one_hot(tensor, num_classes, on_value=1., off_value=0.):
@@ -63,7 +62,6 @@ def one_hot(tensor, num_classes, on_value=1., off_value=0.):
 
 class MusicGenSolverCLS(MusicGenSolver):
     def __init__(self, cfg: omegaconf.DictConfig):
-        print("MUSIC GEN CLS IS WORKING")
         super().__init__(cfg)
 
         ##TODO REMOVE
@@ -71,11 +69,9 @@ class MusicGenSolverCLS(MusicGenSolver):
         self.evaluate()
 
     def collate(self, batch):
-        # print(batch, flush=True)
         return batch
 
     def transform_hugging_face_ds(self, batch):
-        # print(batch)
         audios = []
         labels = []
         
@@ -93,7 +89,6 @@ class MusicGenSolverCLS(MusicGenSolver):
             audios.append(torch.Tensor(y[start : start + (sr * 5)]))
             labels.append(label)
 
-        # print(torch.vstack(audios).shape,  torch.vstack(labels).shape, flush=True)
         return torch.vstack(audios).unsqueeze(1).cuda(), torch.vstack(labels).cuda()
 
     def build_cls_dataset(self):
@@ -107,11 +102,10 @@ class MusicGenSolverCLS(MusicGenSolver):
         self.num_classes = 21
 
     def build_temp_model(self):
-        self.cls_model = CLSModel(self.model, self.num_classes)
-        # print(self.cls_model)
+        cls_model = CLSModel(self.model, self.num_classes)
         
-    def get_metadata(self, filepath):
-        return MusicInfo(
+    def get_metadata(self, filepath, audio=None):
+        music_info = MusicInfo(
                 AudioMeta(
                     path=filepath,
                     duration=5,
@@ -123,34 +117,53 @@ class MusicGenSolverCLS(MusicGenSolver):
                 channels=1,
                 sample_rate=32_000
             )
+        if audio is not None:
+            music_info.self_wav = WavCondition(
+                wav=audio, length=torch.tensor([music_info.n_frames]),
+                sample_rate=[music_info.sample_rate], path=[music_info.meta.path], seek_time=[music_info.seek_time])
+            
+        return music_info
+    
     def evaluate_cls_application(self):
         """Evaluation but for CLS""" 
+
+        # For some reason, grad isn't enabled by default...
+        torch.set_grad_enabled(True)
 
         #Step 1: Get Dataset
         self.build_cls_dataset()
 
         #Step 2: Get a model prepped
-        self.build_temp_model()
-        self.cls_model = self.cls_model.cuda()
+        #self.build_temp_model()
+        cls_model = CLSModel(self.model, self.num_classes)
+        cls_model = cls_model.cuda()
 
         # Train Loop
         criterion = nn.BCEWithLogitsLoss()
-        optimizer = optim.Adam(self.cls_model.parameters(), lr=0.001)
-        # self.cls_model.train() # THERE IS A BUG HERE
-        # I think during training requires audio conditioning
-        # And we aren't doing audio conditioning... currently
+        optimizer = optim.Adam(cls_model.parameters(), lr=0.001)
+        
+        cls_model = cls_model.train()
         for i, batch in enumerate(self.cls_dataloaders["train"]):
             # Step 3: Data preprocessing to fake a dataset, because I am lazy
             # TODO: turn this into a function call, need for training too
             audio_data, labels = self.transform_hugging_face_ds(batch)
             condition_tensors, audio_tokens, padding_mask = self._prepare_tokens_and_attributes(
-                (audio_data, [self.get_metadata(item["filepath"]) for item in batch]))
+                (
+                    audio_data, 
+                    [
+                        self.get_metadata(
+                            batch[i]["filepath"], 
+                            audio=audio_data[i]
+                        ) for i in range(len(batch))
+                    ]
+                )
+            )
+            audio_tokens = audio_tokens
             description_tesnor = condition_tensors["description"][0].to(torch.float32)
             condition_tensors["description"] = (description_tesnor, condition_tensors["description"][1])
 
             optimizer.zero_grad()
-            output = self.cls_model(audio_tokens, condition_tensors)
-            print(output)
+            output = cls_model(audio_tokens, condition_tensors)
             loss = criterion(output, labels)
             loss.backward()
             optimizer.step()
@@ -158,7 +171,7 @@ class MusicGenSolverCLS(MusicGenSolver):
             break #TODO REMOVE
 
         # Evaluation Loop
-        self.cls_model.eval()
+        cls_model.eval()
         for i, batch in enumerate(self.cls_dataloaders["test_5s"]):
             # Step 3: Data preprocessing to fake a dataset, because I am lazy
             # TODO: turn this into a function call, need for training too
@@ -169,35 +182,13 @@ class MusicGenSolverCLS(MusicGenSolver):
             condition_tensors["description"] = (description_tesnor, condition_tensors["description"][1])
 
             # TODO Get metrics from model performance on soundscapes / xc validation split?
-            
-            print(audio_tokens.shape, condition_tensors["description"][0].shape)
-            print(self.cls_model(audio_tokens, condition_tensors).shape, labels.shape)
-
-            output = self.cls_model(audio_tokens, condition_tensors)
+            output = cls_model(audio_tokens, condition_tensors)
             loss = criterion(output, labels)
-            print(loss)
+            print(loss) #Collect metrics here
             break #TODO REMOVE
 
-        del self.cls_model
-
-        print("works!")
-        print("works!")
-
-        print("works!")
-        print("works!")
-        print("works!")
-        print("works!")
-        print("works!")
-        print("works!")
-
-
-        print("works!")
-        print("works!")
-        print("works!")
-        print("works!")
-        print("works!")
-        print("works!")
-        return {"Test_Metric_FOR_CLS": [100]}
+        del cls_model
+        return {"Test_Metric_FOR_CLS": [100]} #TODO actually collect metrics
 
 
     ## Overrides the following methods to run above system
