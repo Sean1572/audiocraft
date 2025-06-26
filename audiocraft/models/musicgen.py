@@ -20,8 +20,7 @@ from .lm import LMModel
 from .builders import get_debug_compression_model, get_debug_lm_model
 from .loaders import load_compression_model, load_lm_model
 from ..data.audio_utils import convert_audio
-from ..modules.conditioners import ConditioningAttributes, WavCondition, StyleConditioner
-
+from ..modules.conditioners import ConditioningAttributes, WavCondition, StyleConditioner, SegmentWithAttributes
 
 MelodyList = tp.List[tp.Optional[torch.Tensor]]
 MelodyType = tp.Union[torch.Tensor, MelodyList]
@@ -50,6 +49,9 @@ class MusicGen(BaseGenModel):
     """
     def __init__(self, name: str, compression_model: CompressionModel, lm: LMModel,
                  max_duration: tp.Optional[float] = None):
+        
+        print("WRONG MODEL!!!!!!")
+        input()
         super().__init__(name, compression_model, lm, max_duration)
         self.set_generation_params(duration=15)  # default duration
 

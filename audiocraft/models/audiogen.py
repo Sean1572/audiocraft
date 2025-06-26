@@ -33,6 +33,7 @@ class AudioGen(BaseGenModel):
     """
     def __init__(self, name: str, compression_model: CompressionModel, lm: LMModel,
                  max_duration: tp.Optional[float] = None):
+        print("AUDIO GEN MAYBE?")
         super().__init__(name, compression_model, lm, max_duration)
         self.set_generation_params(duration=5)  # default duration
 
