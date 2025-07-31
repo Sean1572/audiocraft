@@ -32,20 +32,20 @@ logging:
   level: INFO
   log_updates: 10
   log_tensorboard: false
-  log_wandb: false
+  log_wandb: true
 tensorboard:
   with_media_logging: false
   name:  # optional name for the experiment
   sub_dir:  # optional sub directory to store tensorboard data
 wandb:
-  with_media_logging: true
-  project:  # project name
-  name:  # optional name for the experiment
+  with_media_logging: false
+  project: "autoregressive_birds" # project name
+  name: "inital_test" # optional name for the experiment
   group:  # optional group
 
 # SLURM launcher configuration.
 slurm:
-  gpus: 6  # convenience parameter, number of GPUs to use.
+  gpus: 5  # convenience parameter, number of GPUs to use.
   mem_per_gpu: 40  # in GB, total mem is automatically scaled with `gpus`.
   time: 3600
   constraint:
