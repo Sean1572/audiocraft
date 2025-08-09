@@ -21,7 +21,7 @@ def export_encodec(checkpoint_path: tp.Union[Path, str], out_file: tp.Union[Path
     """Export only the best state from the given EnCodec checkpoint. This
     should be used if you trained your own EnCodec model.
     """
-    pkg = torch.load(checkpoint_path, 'cpu')
+    pkg = torch.load(checkpoint_path, 'cpu', weights_only=False)
     new_pkg = {
         'best_state': pkg['best_state']['model'],
         'xp.cfg': OmegaConf.to_yaml(pkg['xp.cfg']),
@@ -61,7 +61,7 @@ def export_pretrained_compression_model(pretrained_encodec: str, out_file: tp.Un
 def export_lm(checkpoint_path: tp.Union[Path, str], out_file: tp.Union[Path, str]):
     """Export only the best state from the given MusicGen or AudioGen checkpoint.
     """
-    pkg = torch.load(checkpoint_path, 'cpu')
+    pkg = torch.load(checkpoint_path, 'cpu', weights_only=False)
     if pkg['fsdp_best_state']:
         best_state = pkg['fsdp_best_state']['model']
     else:
